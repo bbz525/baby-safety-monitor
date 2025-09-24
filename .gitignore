@@ -1,0 +1,25 @@
+# General
+.DS_Store
+node_modules/
+.env
+*.log
+
+# Java / Maven
+backend/target/
+backend/.idea/
+backend/.classpath
+backend/.project
+backend/.settings/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Frontend
+frontend/dist/
+frontend/.vite/
+
+# Runtime data
+*.db
+/tmp/
