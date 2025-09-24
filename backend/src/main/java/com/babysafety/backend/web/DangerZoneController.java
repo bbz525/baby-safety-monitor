@@ -3,6 +3,8 @@ package com.babysafety.backend.web;
 import com.babysafety.backend.domain.DangerZone;
 import com.babysafety.backend.repository.DangerZoneRepository;
 import com.babysafety.backend.web.dto.DangerZoneRequest;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,11 +21,13 @@ public class DangerZoneController {
     }
 
     @GetMapping
+    @Cacheable("zones")
     public List<DangerZone> list() {
         return repository.findAll();
     }
 
     @PostMapping
+    @CacheEvict(value = "zones", allEntries = true)
     public DangerZone create(@RequestBody DangerZoneRequest req) {
         DangerZone z = new DangerZone();
         z.setName(req.name);
@@ -34,6 +38,7 @@ public class DangerZoneController {
     }
 
     @PutMapping("/{id}")
+    @CacheEvict(value = "zones", allEntries = true)
     public DangerZone update(@PathVariable Long id, @RequestBody DangerZoneRequest req) {
         DangerZone z = repository.findById(id).orElseThrow();
         if (req.name != null) z.setName(req.name);
@@ -44,6 +49,7 @@ public class DangerZoneController {
     }
 
     @DeleteMapping("/{id}")
+    @CacheEvict(value = "zones", allEntries = true)
     public void delete(@PathVariable Long id) {
         repository.deleteById(id);
     }

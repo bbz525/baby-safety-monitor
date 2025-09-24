@@ -6,6 +6,8 @@ services:
       - "8080:8080"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
+      - DINGTALK_WEBHOOK=${DINGTALK_WEBHOOK-}
+      - DINGTALK_SECRET=${DINGTALK_SECRET-}
     volumes:
       - ./data:/app/data
     depends_on:
@@ -26,8 +28,11 @@ services:
     build: ./services/vision
     ports:
       - "8001:8001"
+    environment:
+      - YOLO_WEIGHTS=/models/yolov8n.pt
     volumes:
       - ./data:/app/data
+      - ./data/models:/models
     restart: unless-stopped
 
   agent:
@@ -36,6 +41,7 @@ services:
       - "8002:8002"
     environment:
       - BACKEND_BASE=http://backend:8080
+      - VISION_BASE=http://localhost:8001
     restart: unless-stopped
 
 volumes:

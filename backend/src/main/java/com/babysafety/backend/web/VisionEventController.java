@@ -50,7 +50,7 @@ public class VisionEventController {
     }
 
     @GetMapping("/recent")
-    public List<VisionEvent> recent(@RequestParam(defaultValue = "10") int minutes) {
+    public List<VisionEvent> recent(@RequestParam(name = "minutes", defaultValue = "10") int minutes) {
         Instant since = Instant.now().minus(Duration.ofMinutes(minutes));
         return repository.findRecentSince(since);
     }

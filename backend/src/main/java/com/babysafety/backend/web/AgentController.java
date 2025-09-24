@@ -3,6 +3,7 @@ package com.babysafety.backend.web;
 import com.babysafety.backend.domain.Alert;
 import com.babysafety.backend.repository.AlertRepository;
 import com.babysafety.backend.service.SseHub;
+import com.babysafety.backend.service.NotifierService;
 import com.babysafety.backend.web.dto.AgentInsightRequest;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,10 +17,12 @@ public class AgentController {
 
     private final AlertRepository alertRepository;
     private final SseHub sseHub;
+    private final NotifierService notifierService;
 
-    public AgentController(AlertRepository alertRepository, SseHub sseHub) {
+    public AgentController(AlertRepository alertRepository, SseHub sseHub, NotifierService notifierService) {
         this.alertRepository = alertRepository;
         this.sseHub = sseHub;
+        this.notifierService = notifierService;
     }
 
     @PostMapping("/insights")
@@ -33,6 +36,7 @@ public class AgentController {
         a.setDetailsJson(req.detailsJson);
         Alert saved = alertRepository.save(a);
         sseHub.send(saved);
+        notifierService.notifyAlert(saved);
         return saved;
     }
 

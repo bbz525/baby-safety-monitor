@@ -10,6 +10,10 @@ spring:
       hibernate:
         dialect: org.hibernate.community.dialect.SQLiteDialect
         format_sql: true
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=30s
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -25,3 +29,7 @@ logging:
 app:
   sse:
     buffer-capacity: 1000
+  notify:
+    dingtalk:
+      webhook: ${DINGTALK_WEBHOOK:}
+      secret: ${DINGTALK_SECRET:}

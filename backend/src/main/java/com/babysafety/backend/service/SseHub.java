@@ -22,9 +22,9 @@ public class SseHub {
     public void send(Object data) {
         for (SseEmitter emitter : emitters) {
             try {
-                emitter.send(SseEmitter.event().name("event").data(data));
-            } catch (IOException e) {
-                emitter.complete();
+                emitter.send(SseEmitter.event().data(data));
+            } catch (Exception e) { // include IllegalStateException after async errors
+                try { emitter.complete(); } catch (Exception ignored) {}
                 emitters.remove(emitter);
             }
         }
