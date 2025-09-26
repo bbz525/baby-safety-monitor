@@ -1,0 +1,94 @@
+groups:
+  - name: baby_safety_alerts
+    rules:
+      # 服务可用性告警
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "服务 {{ $labels.job }} 已停止"
+          description: "服务 {{ $labels.job }} 在实例 {{ $labels.instance }} 上已停止运行超过30秒"
+
+      # 高CPU使用率告警
+      - alert: HighCPUUsage
+        expr: (100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "高CPU使用率"
+          description: "实例 {{ $labels.instance }} CPU使用率超过80%"
+
+      # 高内存使用率告警
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "高内存使用率"
+          description: "实例 {{ $labels.instance }} 内存使用率超过85%"
+
+      # Vision服务性能告警
+      - alert: VisionHighErrorRate
+        expr: rate(vision_errors_total[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Vision服务错误率过高"
+          description: "Vision服务错误率超过每秒0.1次"
+
+      # 检测帧率过低告警
+      - alert: VisionLowFPS
+        expr: vision_fps < 0.5
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Vision服务FPS过低"
+          description: "Vision服务FPS低于0.5，当前值: {{ $value }}"
+
+      # 磁盘空间不足告警
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 90
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "磁盘空间不足"
+          description: "{{ $labels.instance }} 上的 {{ $labels.mountpoint }} 磁盘使用率超过90%"
+
+  - name: baby_safety_business_alerts
+    rules:
+      # 高风险事件频发告警
+      - alert: HighRiskEventsFrequent
+        expr: rate(vision_high_risk_events_total[1m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "高风险事件频发"
+          description: "在过去1分钟内，高风险事件发生率超过每秒0.05次"
+
+      # 无检测事件告警（摄像头可能故障）
+      - alert: NoDetectionEvents
+        expr: rate(vision_events_total[5m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "检测事件中断"
+          description: "在过去5分钟内没有检测到任何事件，摄像头可能出现故障"
+
+      # 后端API响应时间过长
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API响应时间过长"
+          description: "95%的API请求响应时间超过1秒"

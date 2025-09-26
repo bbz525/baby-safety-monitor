@@ -10,7 +10,7 @@ python scripts/mac_camera_simple.py
 ### 2. 手动设置
 ```bash
 # 1. 添加Mac摄像头
-curl -X POST http://localhost:8001/cameras \
+curl -X POST http://localhost:8005/cameras \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Mac内置摄像头",

@@ -153,8 +153,8 @@ class HTTPStreamServer:
             return False
         
         # 设置摄像头参数
-        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1080)
+        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
         self.camera.set(cv2.CAP_PROP_FPS, 30)
         
         print("✅ 摄像头打开成功")

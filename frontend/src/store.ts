@@ -1,97 +1,266 @@
-import { create } from 'zustand';
+import { create } from 'zustand'
+import { subscriptionsLogic } from 'zustand/middleware/subscriptions'
 
-export type VisionEvent = {
-  id?: number;
-  timestamp: string;
-  trackId: string;
-  x: number; y: number; w: number; h: number;
-  action?: string;
-  riskScore?: number;
-};
-
-export type Alert = {
-  id?: number;
-  timestamp: string;
-  trackId?: string;
-  zoneId?: number;
-  level: string;
-  reason?: string;
-  detailsJson?: string;
-};
-
-type State = {
-  events: VisionEvent[];
-  alerts: Alert[];
-  connected: boolean;
-  lastError?: string;
-  connect: () => void;
-};
-
-let currentEs: EventSource | null = null;
-let reconnectTimer: number | null = null;
-
-function notifyAlert(title: string, body?: string) {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted') {
-    new Notification(title, { body });
-  } else if (Notification.permission !== 'denied') {
-    Notification.requestPermission();
-  }
+export interface VisionEvent {
+  id?: string
+  timestamp?: string
+  trackId: string
+  x: number
+  y: number
+  w: number
+  h: number
+  action?: string
+  riskScore?: number
+  cameraId?: string
 }
 
-export const useStore = create<State>((set, get) => ({
+export interface Alert {
+  id?: string
+  timestamp?: string
+  trackId?: string
+  zoneId?: number
+  level: 'info' | 'warn' | 'critical'
+  reason?: string
+  detailsJson?: string
+}
+
+export interface Camera {
+  id: string
+  name: string
+  source: string
+  type: 'rtsp' | 'http' | 'file' | 'mac_camera'
+  enabled: boolean
+  fps: number
+  resolution: number
+  status: 'stopped' | 'running' | 'error'
+  lastError?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface AppState {
+  // 连接状态
+  connected: boolean
+  lastError: string | null
+  eventSource: EventSource | null
+  
+  // 数据
+  events: VisionEvent[]
+  alerts: Alert[]
+  cameras: Camera[]
+  
+  // 统计信息
+  stats: {
+    totalEvents: number
+    totalAlerts: number
+    activeCameras: number
+    avgRiskScore: number
+  }
+  
+  // UI状态
+  selectedTab: 'events' | 'alerts' | 'cameras' | 'analytics'
+  showSettings: boolean
+  darkMode: boolean
+  autoRefresh: boolean
+  refreshInterval: number
+  
+  // 过滤器
+  filters: {
+    riskLevel: 'all' | 'low' | 'medium' | 'high'
+    timeRange: '1h' | '6h' | '24h' | 'all'
+    cameraId: string | null
+  }
+  
+  // 操作方法
+  connect: () => void
+  disconnect: () => void
+  addEvent: (event: VisionEvent) => void
+  addAlert: (alert: Alert) => void
+  setCameras: (cameras: Camera[]) => void
+  updateCamera: (id: string, updates: Partial<Camera>) => void
+  setSelectedTab: (tab: 'events' | 'alerts' | 'cameras' | 'analytics') => void
+  setShowSettings: (show: boolean) => void
+  toggleDarkMode: () => void
+  setAutoRefresh: (enabled: boolean) => void
+  setFilters: (filters: Partial<typeof state.filters>) => void
+  clearEvents: () => void
+  clearAlerts: () => void
+  refreshData: () => void
+}
+
+const initialState = {
+  connected: false,
+  lastError: null,
+  eventSource: null,
   events: [],
   alerts: [],
-  connected: false,
-  lastError: undefined,
-  connect: () => {
-    const base = import.meta.env.VITE_API_BASE || 'http://localhost:8080';
-    const url = `${base}/api/events/stream`;
-
-    const start = () => {
-      if (currentEs) {
-        currentEs.close();
-        currentEs = null;
-      }
-      if (reconnectTimer) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-
-      const es = new EventSource(url);
-      currentEs = es;
-      es.onopen = () => set({ connected: true, lastError: undefined });
-      es.onerror = () => {
-        set({ connected: false, lastError: 'SSE disconnected' });
-        try { es.close(); } catch {}
-        // exponential backoff up to 10s
-        let attempts = 0;
-        const retry = () => {
-          attempts += 1;
-          const delay = Math.min(10000, 500 * Math.pow(2, attempts));
-          reconnectTimer = window.setTimeout(() => {
-            start();
-          }, delay) as unknown as number;
-        };
-        retry();
-      };
-      es.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          if ('w' in data && 'h' in data && 'x' in data) {
-            set({ events: [data, ...get().events].slice(0, 200) });
-          } else if ('level' in data) {
-            set({ alerts: [data, ...get().alerts].slice(0, 200) });
-            notifyAlert(`告警: ${data.level}`, data.reason ?? undefined);
-          }
-        } catch {
-          // ignore
-        }
-      };
-    };
-
-    start();
+  cameras: [],
+  stats: {
+    totalEvents: 0,
+    totalAlerts: 0,
+    activeCameras: 0,
+    avgRiskScore: 0,
   },
-}));
+  selectedTab: 'events' as const,
+  showSettings: false,
+  darkMode: localStorage.getItem('darkMode') === 'true',
+  autoRefresh: true,
+  refreshInterval: 5000,
+  filters: {
+    riskLevel: 'all' as const,
+    timeRange: '1h' as const,
+    cameraId: null,
+  },
+}
 
+export const useStore = create<AppState>()((set, get) => ({
+  ...initialState,
+  
+  connect: () => {
+    const state = get()
+    if (state.eventSource) {
+      state.eventSource.close()
+    }
+    
+    const baseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
+    const eventSource = new EventSource(`${baseUrl}/api/events/stream`)
+    
+    eventSource.onopen = () => {
+      set({ connected: true, lastError: null, eventSource })
+    }
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        
+        // 检测事件类型
+        if ('x' in data && 'y' in data && 'w' in data && 'h' in data) {
+          // Vision事件
+          get().addEvent(data)
+        } else if ('level' in data) {
+          // 告警事件
+          get().addAlert(data)
+        }
+      } catch (error) {
+        console.error('解析事件数据失败:', error)
+      }
+    }
+    
+    eventSource.onerror = () => {
+      set({ 
+        connected: false, 
+        lastError: '连接中断，尝试重连...',
+        eventSource: null 
+      })
+      
+      // 自动重连
+      setTimeout(() => {
+        get().connect()
+      }, 3000)
+    }
+  },
+  
+  disconnect: () => {
+    const state = get()
+    if (state.eventSource) {
+      state.eventSource.close()
+    }
+    set({ connected: false, eventSource: null })
+  },
+  
+  addEvent: (event) => {
+    set((state) => {
+      const newEvents = [event, ...state.events].slice(0, 1000) // 保持最新1000条
+      const stats = {
+        ...state.stats,
+        totalEvents: state.stats.totalEvents + 1,
+        avgRiskScore: newEvents.reduce((sum, e) => sum + (e.riskScore || 0), 0) / newEvents.length
+      }
+      return { events: newEvents, stats }
+    })
+  },
+  
+  addAlert: (alert) => {
+    set((state) => {
+      const newAlerts = [alert, ...state.alerts].slice(0, 500) // 保持最新500条
+      const stats = {
+        ...state.stats,
+        totalAlerts: state.stats.totalAlerts + 1
+      }
+      return { alerts: newAlerts, stats }
+    })
+  },
+  
+  setCameras: (cameras) => {
+    set((state) => {
+      const activeCameras = cameras.filter(c => c.status === 'running').length
+      const stats = { ...state.stats, activeCameras }
+      return { cameras, stats }
+    })
+  },
+  
+  updateCamera: (id, updates) => {
+    set((state) => ({
+      cameras: state.cameras.map(camera => 
+        camera.id === id ? { ...camera, ...updates } : camera
+      )
+    }))
+  },
+  
+  setSelectedTab: (tab) => set({ selectedTab: tab }),
+  setShowSettings: (show) => set({ showSettings: show }),
+  
+  toggleDarkMode: () => {
+    set((state) => {
+      const darkMode = !state.darkMode
+      localStorage.setItem('darkMode', String(darkMode))
+      document.documentElement.classList.toggle('dark', darkMode)
+      return { darkMode }
+    })
+  },
+  
+  setAutoRefresh: (enabled) => set({ autoRefresh: enabled }),
+  setFilters: (filters) => set((state) => ({ 
+    filters: { ...state.filters, ...filters } 
+  })),
+  
+  clearEvents: () => set({ events: [] }),
+  clearAlerts: () => set({ alerts: [] }),
+  
+  refreshData: async () => {
+    try {
+      const baseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
+      const visionUrl = import.meta.env.VITE_VISION_BASE || 'http://localhost:8001'
+      
+      // 获取摄像头列表
+      const cameraResponse = await fetch(`${visionUrl}/cameras`)
+      if (cameraResponse.ok) {
+        const cameras = await cameraResponse.json()
+        get().setCameras(cameras)
+      }
+      
+      // 获取最近事件
+      const eventsResponse = await fetch(`${baseUrl}/api/events/recent?minutes=60`)
+      if (eventsResponse.ok) {
+        const recentEvents = await eventsResponse.json()
+        set({ events: recentEvents })
+      }
+      
+      // 获取最近告警
+      const alertsResponse = await fetch(`${baseUrl}/api/alerts/recent?minutes=60`)
+      if (alertsResponse.ok) {
+        const recentAlerts = await alertsResponse.json()
+        set({ alerts: recentAlerts })
+      }
+      
+    } catch (error) {
+      console.error('刷新数据失败:', error)
+      set({ lastError: '刷新数据失败' })
+    }
+  },
+}))
 
+// 初始化
+if (useStore.getState().darkMode) {
+  document.documentElement.classList.add('dark')
+}

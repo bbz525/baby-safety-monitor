@@ -1,0 +1,161 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "婴儿安全监控系统总览",
+    "tags": ["baby-safety", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "系统状态概览",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up",
+            "legendFormat": "{{job}} - {{instance}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "1",
+                "text": "运行中"
+              },
+              {
+                "type": "value", 
+                "value": "0",
+                "text": "停止"
+              }
+            ],
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "检测事件统计",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(vision_events_total[1m])",
+            "legendFormat": "事件/秒"
+          },
+          {
+            "expr": "rate(vision_detections_total[1m])",
+            "legendFormat": "检测/秒"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "风险等级分布",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (risk_level) (vision_events_by_risk_total)",
+            "legendFormat": "{{risk_level}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "摄像头状态",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "vision_camera_status",
+            "legendFormat": "{{camera_id}} - {{camera_name}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "实时FPS",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "vision_fps",
+            "legendFormat": "FPS"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 30,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "green", "value": 5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "API响应时间",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "50th percentile"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 7,
+        "title": "系统资源使用",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU使用率%"
+          },
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+            "legendFormat": "内存使用率%"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      },
+      {
+        "id": 8,
+        "title": "告警历史",
+        "type": "logs",
+        "targets": [
+          {
+            "expr": "{job=\"alertmanager\"}",
+            "legendFormat": ""
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "5s"
+  }
+}

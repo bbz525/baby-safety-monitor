@@ -1,0 +1,27 @@
+server:
+  port: 8080
+  mode: release
+
+database:
+  driver: sqlite
+  dsn: "data/baby_safety.db"
+
+logging:
+  level: info
+  format: text
+
+sse:
+  buffer_size: 256
+  timeout: 30s
+
+notification:
+  dingtalk:
+    webhook: ""
+    secret: ""
+  browser:
+    enabled: true
+
+cache:
+  danger_zones:
+    ttl: 5m
+    max_size: 100

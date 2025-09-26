@@ -1,49 +1,138 @@
 version: "3.9"
 services:
-  backend:
-    build: ./backend
+  # Go后端服务（推荐使用）
+  backend-go:
+    build: 
+      context: ./backend-go
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     environment:
-      - SPRING_PROFILES_ACTIVE=docker
-      - DINGTALK_WEBHOOK=${DINGTALK_WEBHOOK-}
-      - DINGTALK_SECRET=${DINGTALK_SECRET-}
+      - PORT=8080
+      - GIN_MODE=release
+      - DB_DSN=data/baby_safety.db
+      - LOG_LEVEL=info
+      - DINGTALK_WEBHOOK=${DINGTALK_WEBHOOK:-}
+      - DINGTALK_SECRET=${DINGTALK_SECRET:-}
     volumes:
       - ./data:/app/data
     depends_on:
+      - vision
       - agent
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - baby-safety-net
 
+  # Java后端服务（备用）
+  backend-java:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DINGTALK_WEBHOOK=${DINGTALK_WEBHOOK:-}
+      - DINGTALK_SECRET=${DINGTALK_SECRET:-}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - vision
+      - agent
+    restart: unless-stopped
+    profiles: ["java"]  # 只在指定 profile 时启动
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - baby-safety-net
+
+  # 前端服务
   frontend:
-    build: ./frontend
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "5173:5173"
     environment:
       - VITE_API_BASE=http://localhost:8080
+      - VITE_VISION_BASE=http://localhost:8001
     depends_on:
-      - backend
+      - backend-go
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - baby-safety-net
 
+  # 视觉服务
   vision:
-    build: ./services/vision
+    build: 
+      context: ./services/vision
+      dockerfile: Dockerfile
     ports:
       - "8001:8001"
     environment:
       - YOLO_WEIGHTS=/models/yolov8n.pt
+      - BACKEND_BASE=http://backend-go:8080
+      - LOG_LEVEL=info
     volumes:
       - ./data:/app/data
       - ./data/models:/models
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - baby-safety-net
 
+  # AI代理服务
   agent:
-    build: ./services/agent
+    build: 
+      context: ./services/agent
+      dockerfile: Dockerfile
     ports:
       - "8002:8002"
     environment:
-      - BACKEND_BASE=http://backend:8080
-      - VISION_BASE=http://localhost:8001
+      - BACKEND_BASE=http://backend-go:8080
+      - VISION_BASE=http://vision:8001
+      - RISK_THRESHOLD=0.7
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - baby-safety-net
 
+# 网络配置
+networks:
+  baby-safety-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 数据卷配置
 volumes:
   data:
     driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data

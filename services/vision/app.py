@@ -6,20 +6,98 @@ import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+import logging
 
 import httpx
 import cv2
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 import shutil
 from pydantic import BaseModel
 from ultralytics import YOLO
 import tempfile
+import queue
+import numpy as np
 
 
 BACKEND_BASE = os.getenv("BACKEND_BASE", "http://backend:8080")
 
-app = FastAPI(title="Vision Service", version="0.3.0")
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# 性能指标
+class PerformanceMetrics:
+    def __init__(self):
+        self.total_frames = 0
+        self.total_detections = 0
+        self.total_errors = 0
+        self.start_time = time.time()
+        self.last_fps_time = time.time()
+        self.last_frame_count = 0
+        
+    def record_frame(self):
+        self.total_frames += 1
+        
+    def record_detection(self):
+        self.total_detections += 1
+        
+    def record_error(self):
+        self.total_errors += 1
+        
+    def get_fps(self):
+        current_time = time.time()
+        time_diff = current_time - self.last_fps_time
+        if time_diff >= 1.0:  # 每秒计算一次
+            frame_diff = self.total_frames - self.last_frame_count
+            fps = frame_diff / time_diff
+            self.last_fps_time = current_time
+            self.last_frame_count = self.total_frames
+            return fps
+        return 0
+        
+    def get_stats(self):
+        uptime = time.time() - self.start_time
+        return {
+            "uptime_seconds": uptime,
+            "total_frames": self.total_frames,
+            "total_detections": self.total_detections,
+            "total_errors": self.total_errors,
+            "avg_fps": self.total_frames / uptime if uptime > 0 else 0,
+            "detection_rate": self.total_detections / self.total_frames if self.total_frames > 0 else 0
+        }
+
+metrics = PerformanceMetrics()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时初始化
+    logger.info("Vision 服务启动中...")
+    
+    # 初始化线程池
+    camera_manager.thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="vision-worker")
+    
+    yield
+    
+    # 关闭时清理
+    logger.info("Vision 服务关闭中...")
+    
+    # 停止所有摄像头
+    for camera_id in list(camera_manager.cameras.keys()):
+        camera_manager.stop_camera(camera_id)
+    
+    # 关闭线程池
+    if camera_manager.thread_pool:
+        camera_manager.thread_pool.shutdown(wait=True)
+    
+    logger.info("Vision 服务已关闭")
+
+app = FastAPI(title="Vision Service", version="0.4.0", lifespan=lifespan)
 
 
 class CameraStatus(str, Enum):
@@ -63,6 +141,22 @@ class CameraManager:
         self.capture_threads: Dict[str, threading.Thread] = {}
         self.stop_events: Dict[str, threading.Event] = {}
         self.model: Optional[YOLO] = None
+        self.thread_pool: Optional[ThreadPoolExecutor] = None
+        self.http_client: Optional[httpx.Client] = None
+        self.frame_queue = queue.Queue(maxsize=100)  # 帧缓冲队列
+        
+    def get_http_client(self) -> httpx.Client:
+        """@获取HTTP客户端（连接池）"""
+        if self.http_client is None:
+            self.http_client = httpx.Client(
+                timeout=10.0,
+                limits=httpx.Limits(
+                    max_keepalive_connections=20,
+                    max_connections=100,
+                    keepalive_expiry=30.0
+                )
+            )
+        return self.http_client
         
     def get_model(self) -> YOLO:
         if self.model is None:
@@ -123,21 +217,43 @@ class CameraManager:
         return True
     
     def stop_camera(self, camera_id: str) -> bool:
-        if camera_id in self.stop_events:
-            self.stop_events[camera_id].set()
-        
-        if camera_id in self.capture_threads:
-            thread = self.capture_threads[camera_id]
-            thread.join(timeout=5.0)
-            del self.capture_threads[camera_id]
-        
-        if camera_id in self.stop_events:
-            del self.stop_events[camera_id]
-        
-        if camera_id in self.cameras:
-            self.cameras[camera_id].status = CameraStatus.STOPPED
-        
-        return True
+        try:
+            # 发出停止信号（非阻塞）
+            if camera_id in self.stop_events:
+                self.stop_events[camera_id].set()
+
+            # 尽量避免在请求线程中 join，防止阻塞导致服务不可用
+            if camera_id in self.capture_threads:
+                thread = self.capture_threads[camera_id]
+                if thread.is_alive() and threading.current_thread() is not thread:
+                    # 在后台短暂等待线程结束，但不阻塞当前请求
+                    def _join_target(t: threading.Thread, cid: str):
+                        try:
+                            t.join(timeout=5.0)
+                        except Exception:
+                            pass
+                        finally:
+                            # 安全地清理引用
+                            self.capture_threads.pop(cid, None)
+                            self.stop_events.pop(cid, None)
+
+                    threading.Thread(target=_join_target, args=(thread, camera_id), daemon=True).start()
+                else:
+                    # 无需等待，直接清理引用
+                    self.capture_threads.pop(camera_id, None)
+                    self.stop_events.pop(camera_id, None)
+
+            # 更新状态
+            if camera_id in self.cameras:
+                self.cameras[camera_id].status = CameraStatus.STOPPED
+                self.cameras[camera_id].last_error = None
+
+            return True
+        except Exception:
+            # 任何异常都不应影响服务稳定性
+            if camera_id in self.cameras:
+                self.cameras[camera_id].status = CameraStatus.ERROR
+            return False
     
     def _capture_loop(self, camera_id: str, stop_event: threading.Event):
         camera = self.cameras[camera_id]
@@ -189,13 +305,19 @@ class CameraManager:
             camera.status = CameraStatus.ERROR
             camera.last_error = str(e)
         finally:
-            if cap:
-                cap.release()
+            try:
+                if cap:
+                    cap.release()
+            except Exception:
+                pass
     
     def _process_frame(self, camera_id: str, frame):
         try:
             camera = self.cameras[camera_id]
             model = self.get_model()
+            
+            # 记录性能指标
+            metrics.record_frame()
             
             # 执行YOLO推理
             results = model.predict(
@@ -212,14 +334,22 @@ class CameraManager:
             if res.boxes is None:
                 return
             
-            # 保存当前帧
-            os.makedirs("/app/data", exist_ok=True)
-            cv2.imwrite("/app/data/last.jpg", frame)
+            # 保存当前帧（异步）
+            if self.thread_pool:
+                self.thread_pool.submit(self._save_frame, frame)
+            else:
+                self._save_frame(frame)
             
             # 处理检测结果
             for box in res.boxes:
                 cls_id = int(box.cls.item()) if box.cls is not None else -1
-                xywh = box.xywh.cpu().numpy().astype(int).tolist()[0]
+                # 安全地处理坐标数据
+                try:
+                    xywh = box.xywh.cpu().numpy().astype(int).tolist()[0]
+                except AttributeError:
+                    # 如果没有cpu()方法，直接转换
+                    xywh = box.xywh.numpy().astype(int).tolist()[0]
+                    
                 x_center, y_center, w, h = xywh
                 x = max(0, int(x_center - w / 2))
                 y = max(0, int(y_center - h / 2))
@@ -227,26 +357,52 @@ class CameraManager:
                 
                 # 只处理人员检测
                 if cls_id == 0:  # COCO person class
+                    metrics.record_detection()
                     event = VisionEvent(
                         trackId=f"{camera_id}-{uuid.uuid4().hex[:8]}",
                         bbox=[x, y, int(w), int(h)],
                         action="detected",
                         riskScore=min(0.99, 1.0 - (1.0 - conf) * 0.5),
                     )
-                    self._emit_event(event)
+                    # 异步发送事件
+                    if self.thread_pool:
+                        self.thread_pool.submit(self._emit_event, event)
+                    else:
+                        self._emit_event(event)
                     break  # 只发送第一个检测到的人员
                     
         except Exception as e:
-            print(f"处理帧时出错: {e}")
+            metrics.record_error()
+            logger.error(f"处理帧时出错: {e}")
+    
+    def _save_frame(self, frame):
+        """@保存帧到文件"""
+        try:
+            os.makedirs("/app/data", exist_ok=True)
+            cv2.imwrite("/app/data/last.jpg", frame)
+        except Exception as e:
+            logger.error(f"保存帧失败: {e}")
     
     def _emit_event(self, event: VisionEvent):
-        try:
-            url = f"{BACKEND_BASE}/api/events/vision"
-            with httpx.Client(timeout=5.0) as client:
-                r = client.post(url, json=event.model_dump())
-                r.raise_for_status()
-        except Exception as e:
-            print(f"发送事件失败: {e}")
+        """@发送事件到后端"""
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                url = f"{BACKEND_BASE}/api/events/vision"
+                client = self.get_http_client()
+                response = client.post(url, json=event.model_dump())
+                response.raise_for_status()
+                logger.debug(f"事件发送成功: {event.trackId}")
+                return
+            except Exception as e:
+                logger.warning(f"发送事件失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))  # 指数退避
+                else:
+                    metrics.record_error()
+                    logger.error(f"发送事件最终失败: {e}")
 
 
 # 全局摄像头管理器
@@ -255,7 +411,32 @@ camera_manager = CameraManager()
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "backend": BACKEND_BASE}
+    return {
+        "status": "ok", 
+        "backend": BACKEND_BASE,
+        "metrics": metrics.get_stats(),
+        "current_fps": metrics.get_fps(),
+        "active_cameras": len([c for c in camera_manager.cameras.values() if c.status == CameraStatus.RUNNING])
+    }
+
+
+@app.get("/metrics")
+def get_metrics():
+    """@获取详细性能指标"""
+    stats = metrics.get_stats()
+    stats.update({
+        "cameras": {
+            "total": len(camera_manager.cameras),
+            "running": len([c for c in camera_manager.cameras.values() if c.status == CameraStatus.RUNNING]),
+            "stopped": len([c for c in camera_manager.cameras.values() if c.status == CameraStatus.STOPPED]),
+            "error": len([c for c in camera_manager.cameras.values() if c.status == CameraStatus.ERROR]),
+        },
+        "system": {
+            "thread_pool_active": camera_manager.thread_pool._threads if camera_manager.thread_pool else 0,
+            "capture_threads": len(camera_manager.capture_threads),
+        }
+    })
+    return stats
 
 
 @app.post("/emit")
