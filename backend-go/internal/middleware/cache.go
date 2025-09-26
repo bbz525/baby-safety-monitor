@@ -1,4 +1,5 @@
 package middleware
+package middleware
 
 import (
 	"crypto/md5"
