@@ -1,0 +1,39 @@
+-- Your SQL goes here
+CREATE TABLE vision_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    ts TIMESTAMP NOT NULL,
+    track_id VARCHAR NOT NULL,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    w INTEGER NOT NULL,
+    h INTEGER NOT NULL,
+    action VARCHAR,
+    risk_score REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_vision_event_ts_track ON vision_events (ts, track_id);
+
+CREATE TABLE alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    ts TIMESTAMP NOT NULL,
+    level VARCHAR NOT NULL,
+    reason VARCHAR,
+    track_id VARCHAR,
+    details TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_alert_ts_level ON alerts (ts, level);
+
+CREATE TABLE danger_zones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    name VARCHAR NOT NULL,
+    polygon_json TEXT NOT NULL,
+    level VARCHAR NOT NULL,
+    enabled BOOLEAN DEFAULT TRUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);

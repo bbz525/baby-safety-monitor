@@ -1,6 +1,6 @@
 module baby-safety-monitor
 
-go 1.21
+go 1.24.0
 
 require (
 	github.com/gin-gonic/gin v1.9.1
@@ -8,6 +8,8 @@ require (
 	gorm.io/driver/sqlite v1.5.4
 	gorm.io/gorm v1.25.5
 )
+
+require github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect
@@ -35,6 +37,7 @@ require (
 	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/sys v0.13.0 // indirect
 	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/time v0.13.0
 	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

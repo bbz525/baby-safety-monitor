@@ -9,18 +9,21 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
 )
 
 type VisionEventController struct {
 	visionEventRepo *repository.VisionEventRepository
 	sseHub          *service.SSEHub
+	cache           *cache.Cache
 }
 
 func NewVisionEventController(sseHub *service.SSEHub) *VisionEventController {
 	return &VisionEventController{
 		visionEventRepo: repository.NewVisionEventRepository(),
 		sseHub:          sseHub,
+		cache:           cache.New(5*time.Minute, 10*time.Minute),
 	}
 }
 
@@ -49,7 +52,11 @@ func (c *VisionEventController) CreateVisionEvent(ctx *gin.Context) {
 		"data":      event,
 	})
 
-	logrus.Infof("视觉事件已创建: TrackID=%s, Action=%s, RiskScore=%.2f", 
+	// 清除相关缓存
+	c.cache.Delete("event_stats")
+	// 也可以根据需要清除其他缓存，例如 recent_events_*
+
+	logrus.Infof("视觉事件已创建: TrackID=%s, Action=%s, RiskScore=%.2f",
 		event.TrackID, event.Action, event.RiskScore)
 
 	ctx.JSON(http.StatusCreated, gin.H{
@@ -60,18 +67,22 @@ func (c *VisionEventController) CreateVisionEvent(ctx *gin.Context) {
 
 // GetRecentEvents 获取最近事件
 func (c *VisionEventController) GetRecentEvents(ctx *gin.Context) {
-	// 获取分钟参数
 	minutesStr := ctx.DefaultQuery("minutes", "10")
+	cacheKey := "recent_events_" + minutesStr
+
+	// 尝试从缓存中获取
+	if events, found := c.cache.Get(cacheKey); found {
+		ctx.JSON(http.StatusOK, events)
+		return
+	}
+
 	minutes, err := strconv.Atoi(minutesStr)
 	if err != nil || minutes <= 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "无效的分钟参数"})
 		return
 	}
 
-	// 计算时间范围
 	since := time.Now().Add(-time.Duration(minutes) * time.Minute)
-
-	// 查询事件
 	events, err := c.visionEventRepo.FindRecentSince(since)
 	if err != nil {
 		logrus.Errorf("查询最近事件失败: %v", err)
@@ -79,6 +90,8 @@ func (c *VisionEventController) GetRecentEvents(ctx *gin.Context) {
 		return
 	}
 
+	// 存入缓存
+	c.cache.Set(cacheKey, events, 1*time.Minute)
 	ctx.JSON(http.StatusOK, events)
 }
 
@@ -102,6 +115,14 @@ func (c *VisionEventController) GetEventsByTrackID(ctx *gin.Context) {
 
 // GetEventStats 获取事件统计
 func (c *VisionEventController) GetEventStats(ctx *gin.Context) {
+	cacheKey := "event_stats"
+
+	// 尝试从缓存中获取
+	if stats, found := c.cache.Get(cacheKey); found {
+		ctx.JSON(http.StatusOK, stats)
+		return
+	}
+
 	count, err := c.visionEventRepo.Count()
 	if err != nil {
 		logrus.Errorf("获取事件统计失败: %v", err)
@@ -109,8 +130,12 @@ func (c *VisionEventController) GetEventStats(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	stats := gin.H{
 		"totalEvents": count,
 		"timestamp":   time.Now().Format(time.RFC3339),
-	})
+	}
+
+	// 存入缓存
+	c.cache.Set(cacheKey, stats, 2*time.Minute)
+	ctx.JSON(http.StatusOK, stats)
 }

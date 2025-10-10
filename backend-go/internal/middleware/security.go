@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"context"
 	"crypto/subtle"
+	"fmt"
+	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -172,8 +174,9 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 // Recovery 错误恢复中间件
 func Recovery() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
-		logger.Errorf("系统异常: %v", recovered)
-		
+		// 修复：logger 未定义，改为使用 log 包
+		log.Printf("系统异常: %v", recovered)
+
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "服务器内部错误",
 			"code":  "INTERNAL_SERVER_ERROR",

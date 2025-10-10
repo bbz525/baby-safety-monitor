@@ -1,6 +1,5 @@
 #!/bin/bash
-
-# 婴儿安全监控系统 Go后端启动脚本
+全监控系统 Go后端启动脚本
 
 set -e
 
@@ -16,7 +15,7 @@ echo "✅ Go环境检查通过"
 
 # 检查Go版本
 GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-REQUIRED_VERSION="1.21"
+REQUIRED_VERSION="1.25"
 
 if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$GO_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
     echo "❌ Go版本过低，需要1.21+，当前版本: $GO_VERSION"

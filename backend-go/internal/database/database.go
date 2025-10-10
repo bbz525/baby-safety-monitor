@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -26,10 +27,19 @@ func InitDatabase() error {
 	// 数据库文件路径
 	dbPath := filepath.Join(dataDir, "baby_safety.db")
 
+	// 启用WAL模式以提高并发性能
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL", dbPath)
+
+	// 根据环境设置日志级别
+	logLevel := logger.Info
+	if gin.Mode() == gin.ReleaseMode {
+		logLevel = logger.Warn
+	}
+
 	// 连接数据库
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {
 		return err

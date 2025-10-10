@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,6 +17,7 @@ type AlertController struct {
 	alertRepo           *repository.AlertRepository
 	notificationService *service.NotificationService
 	sseHub              *service.SSEHub
+	cache               *cache.Cache
 }
 
 func NewAlertController(sseHub *service.SSEHub) *AlertController {
@@ -23,6 +25,7 @@ func NewAlertController(sseHub *service.SSEHub) *AlertController {
 		alertRepo:           repository.NewAlertRepository(),
 		notificationService: service.NewNotificationService(),
 		sseHub:              sseHub,
+		cache:               cache.New(5*time.Minute, 10*time.Minute),
 	}
 }
 
@@ -52,7 +55,10 @@ func (c *AlertController) CreateAlert(ctx *gin.Context) {
 	// 发送浏览器通知
 	c.notificationService.SendBrowserNotification(c.sseHub, alert)
 
-	logrus.Infof("告警已创建: Level=%s, Reason=%s, TrackID=%s", 
+	// 清除相关缓存
+	c.cache.Delete("alert_stats")
+
+	logrus.Infof("告警已创建: Level=%s, Reason=%s, TrackID=%s",
 		alert.Level, alert.Reason, alert.TrackID)
 
 	ctx.JSON(http.StatusCreated, gin.H{
@@ -63,18 +69,21 @@ func (c *AlertController) CreateAlert(ctx *gin.Context) {
 
 // GetRecentAlerts 获取最近告警
 func (c *AlertController) GetRecentAlerts(ctx *gin.Context) {
-	// 获取分钟参数
 	minutesStr := ctx.DefaultQuery("minutes", "60")
+	cacheKey := "recent_alerts_" + minutesStr
+
+	if alerts, found := c.cache.Get(cacheKey); found {
+		ctx.JSON(http.StatusOK, alerts)
+		return
+	}
+
 	minutes, err := strconv.Atoi(minutesStr)
 	if err != nil || minutes <= 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "无效的分钟参数"})
 		return
 	}
 
-	// 计算时间范围
 	since := time.Now().Add(-time.Duration(minutes) * time.Minute)
-
-	// 查询告警
 	alerts, err := c.alertRepo.FindRecentSince(since)
 	if err != nil {
 		logrus.Errorf("查询最近告警失败: %v", err)
@@ -82,6 +91,7 @@ func (c *AlertController) GetRecentAlerts(ctx *gin.Context) {
 		return
 	}
 
+	c.cache.Set(cacheKey, alerts, 1*time.Minute)
 	ctx.JSON(http.StatusOK, alerts)
 }
 
@@ -105,6 +115,13 @@ func (c *AlertController) GetAlertsByLevel(ctx *gin.Context) {
 
 // GetAlertStats 获取告警统计
 func (c *AlertController) GetAlertStats(ctx *gin.Context) {
+	cacheKey := "alert_stats"
+
+	if stats, found := c.cache.Get(cacheKey); found {
+		ctx.JSON(http.StatusOK, stats)
+		return
+	}
+
 	count, err := c.alertRepo.Count()
 	if err != nil {
 		logrus.Errorf("获取告警统计失败: %v", err)
@@ -112,8 +129,11 @@ func (c *AlertController) GetAlertStats(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	stats := gin.H{
 		"totalAlerts": count,
 		"timestamp":   time.Now().Format(time.RFC3339),
-	})
+	}
+
+	c.cache.Set(cacheKey, stats, 2*time.Minute)
+	ctx.JSON(http.StatusOK, stats)
 }

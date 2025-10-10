@@ -5,18 +5,22 @@ import (
 	"baby-safety-monitor/internal/repository"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
 )
 
 type DangerZoneController struct {
 	dangerZoneRepo *repository.DangerZoneRepository
+	cache          *cache.Cache
 }
 
 func NewDangerZoneController() *DangerZoneController {
 	return &DangerZoneController{
 		dangerZoneRepo: repository.NewDangerZoneRepository(),
+		cache:          cache.New(10*time.Minute, 20*time.Minute),
 	}
 }
 
@@ -38,6 +42,10 @@ func (c *DangerZoneController) CreateDangerZone(ctx *gin.Context) {
 		return
 	}
 
+	// 清除缓存
+	c.cache.Delete("danger_zones")
+	c.cache.Delete("enabled_danger_zones")
+
 	logrus.Infof("危险区域已创建: Name=%s, Level=%s", zone.Name, zone.Level)
 
 	ctx.JSON(http.StatusCreated, gin.H{
@@ -48,6 +56,13 @@ func (c *DangerZoneController) CreateDangerZone(ctx *gin.Context) {
 
 // GetDangerZones 获取所有危险区域
 func (c *DangerZoneController) GetDangerZones(ctx *gin.Context) {
+	cacheKey := "danger_zones"
+
+	if zones, found := c.cache.Get(cacheKey); found {
+		ctx.JSON(http.StatusOK, zones)
+		return
+	}
+
 	zones, err := c.dangerZoneRepo.FindAll()
 	if err != nil {
 		logrus.Errorf("查询危险区域失败: %v", err)
@@ -55,6 +70,7 @@ func (c *DangerZoneController) GetDangerZones(ctx *gin.Context) {
 		return
 	}
 
+	c.cache.Set(cacheKey, zones, cache.DefaultExpiration)
 	ctx.JSON(http.StatusOK, zones)
 }
 
@@ -112,6 +128,11 @@ func (c *DangerZoneController) UpdateDangerZone(ctx *gin.Context) {
 		return
 	}
 
+	// 清除缓存
+	c.cache.Delete("danger_zones")
+	c.cache.Delete("enabled_danger_zones")
+	c.cache.Delete("danger_zone_" + idStr)
+
 	logrus.Infof("危险区域已更新: ID=%d, Name=%s", zone.ID, zone.Name)
 
 	ctx.JSON(http.StatusOK, gin.H{
@@ -143,6 +164,11 @@ func (c *DangerZoneController) DeleteDangerZone(ctx *gin.Context) {
 		return
 	}
 
+	// 清除缓存
+	c.cache.Delete("danger_zones")
+	c.cache.Delete("enabled_danger_zones")
+	c.cache.Delete("danger_zone_" + idStr)
+
 	logrus.Infof("危险区域已删除: ID=%d", id)
 
 	ctx.JSON(http.StatusOK, gin.H{
@@ -152,6 +178,13 @@ func (c *DangerZoneController) DeleteDangerZone(ctx *gin.Context) {
 
 // GetEnabledDangerZones 获取启用的危险区域
 func (c *DangerZoneController) GetEnabledDangerZones(ctx *gin.Context) {
+	cacheKey := "enabled_danger_zones"
+
+	if zones, found := c.cache.Get(cacheKey); found {
+		ctx.JSON(http.StatusOK, zones)
+		return
+	}
+
 	zones, err := c.dangerZoneRepo.FindEnabled()
 	if err != nil {
 		logrus.Errorf("查询启用的危险区域失败: %v", err)
@@ -159,5 +192,6 @@ func (c *DangerZoneController) GetEnabledDangerZones(ctx *gin.Context) {
 		return
 	}
 
+	c.cache.Set(cacheKey, zones, cache.DefaultExpiration)
 	ctx.JSON(http.StatusOK, zones)
 }
