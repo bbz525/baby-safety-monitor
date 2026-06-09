@@ -16,6 +16,15 @@ venv/
 __pycache__/
 *.pyc
 
+# Rust
+backend-rust/target/
+backend-rust/.env
+backend-rust/data/*.db
+
+# Go
+backend-go/bin/
+backend-go/data/*.db
+
 # Frontend
 frontend/dist/
 frontend/.vite/
