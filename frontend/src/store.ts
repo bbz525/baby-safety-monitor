@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { subscriptionsLogic } from 'zustand/middleware/subscriptions'
 
 export interface VisionEvent {
   id?: string
@@ -38,6 +37,12 @@ export interface Camera {
   updatedAt?: string
 }
 
+export type Filters = {
+  riskLevel: 'all' | 'low' | 'medium' | 'high'
+  timeRange: '1h' | '6h' | '24h' | 'all'
+  cameraId: string | null
+}
+
 export interface AppState {
   // 连接状态
   connected: boolean
@@ -65,11 +70,7 @@ export interface AppState {
   refreshInterval: number
   
   // 过滤器
-  filters: {
-    riskLevel: 'all' | 'low' | 'medium' | 'high'
-    timeRange: '1h' | '6h' | '24h' | 'all'
-    cameraId: string | null
-  }
+  filters: Filters
   
   // 操作方法
   connect: () => void
@@ -82,7 +83,7 @@ export interface AppState {
   setShowSettings: (show: boolean) => void
   toggleDarkMode: () => void
   setAutoRefresh: (enabled: boolean) => void
-  setFilters: (filters: Partial<typeof state.filters>) => void
+  setFilters: (filters: Partial<Filters>) => void
   clearEvents: () => void
   clearAlerts: () => void
   refreshData: () => void

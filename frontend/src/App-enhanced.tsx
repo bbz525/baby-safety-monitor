@@ -1,9 +1,37 @@
 import { useEffect, useState } from 'react'
 import './App.css'
-import { useStore } from './store'
+import { useStore, type VisionEvent, type Alert, type Camera } from './store'
+
+type IconName = 'refresh' | 'clear' | 'settings' | 'camera' | 'alert' | 'play' | 'stop'
+
+type IconProps = {
+  name: IconName
+  className?: string
+  size?: number
+}
+
+type RiskBadgeProps = {
+  score?: number
+  level?: 'high' | 'mid' | 'low' | Alert['level'] | null
+}
+
+type StatusIndicatorProps = {
+  status: 'running' | 'stopped' | 'error'
+}
+
+type TabButtonId = 'events' | 'alerts' | 'cameras'
+
+type TabButtonProps = {
+  id: TabButtonId
+  label: string
+  icon: IconName
+  active: boolean
+  onClick: (id: TabButtonId) => void
+  count?: number | null
+}
 
 // 图标组件
-const Icon = ({ name, className = "", size = 20 }) => {
+const Icon = ({ name, className = "", size = 20 }: IconProps) => {
   const icons = {
     refresh: (
       <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
@@ -56,9 +84,24 @@ const Icon = ({ name, className = "", size = 20 }) => {
 }
 
 // 风险等级标识组件
-const RiskBadge = ({ score, level = null }) => {
-  const riskLevel = level || (score >= 0.9 ? 'high' : score >= 0.6 ? 'mid' : 'low')
-  const riskText = level || (score >= 0.9 ? '高风险' : score >= 0.6 ? '中风险' : '低风险')
+const RiskBadge = ({ score = 0, level = null }: RiskBadgeProps) => {
+  const riskLevel: 'high' | 'mid' | 'low' =
+    level === 'critical'
+      ? 'high'
+      : level === 'warn'
+      ? 'mid'
+      : level === 'info'
+      ? 'low'
+      : level || (score >= 0.9 ? 'high' : score >= 0.6 ? 'mid' : 'low')
+
+  const riskText =
+    level === 'critical'
+      ? '严重'
+      : level === 'warn'
+      ? '警告'
+      : level === 'info'
+      ? '信息'
+      : level || (score >= 0.9 ? '高风险' : score >= 0.6 ? '中风险' : '低风险')
   
   return (
     <span className={`risk-badge risk-${riskLevel}`}>
@@ -68,7 +111,7 @@ const RiskBadge = ({ score, level = null }) => {
 }
 
 // 状态指示器组件
-const StatusIndicator = ({ status }) => {
+const StatusIndicator = ({ status }: StatusIndicatorProps) => {
   const statusConfig = {
     running: { text: '运行中', className: 'status-running' },
     stopped: { text: '已停止', className: 'status-stopped' },
@@ -86,7 +129,7 @@ const StatusIndicator = ({ status }) => {
 }
 
 // 标签页组件
-const TabButton = ({ id, label, icon, active, onClick, count = null }) => (
+const TabButton = ({ id, label, icon, active, onClick, count = null }: TabButtonProps) => (
   <button 
     className={`tab-button ${active ? 'active' : ''}`}
     onClick={() => onClick(id)}
@@ -106,8 +149,8 @@ function App() {
   const selectedTab = useStore(s => s.selectedTab || 'events')
   const setSelectedTab = useStore(s => s.setSelectedTab)
   
-  const [cameras, setCameras] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [cameras, setCameras] = useState<Camera[]>([])
+  const [loading, setLoading] = useState<boolean>(false)
 
   useEffect(() => { 
     connect() 
@@ -119,7 +162,7 @@ function App() {
       setLoading(true)
       const response = await fetch('http://localhost:8001/cameras')
       if (response.ok) {
-        const data = await response.json()
+        const data: Camera[] = await response.json()
         setCameras(data)
       }
     } catch (error) {
@@ -129,7 +172,7 @@ function App() {
     }
   }
 
-  const handleCameraAction = async (cameraId, action) => {
+  const handleCameraAction = async (cameraId: Camera['id'], action: 'start' | 'stop') => {
     try {
       const response = await fetch(`http://localhost:8001/cameras/${cameraId}/${action}`, {
         method: 'POST'
@@ -142,7 +185,7 @@ function App() {
     }
   }
 
-  const formatTime = (timestamp) => {
+  const formatTime = (timestamp: string | number | Date | null | undefined) => {
     if (!timestamp) return ''
     return new Date(timestamp).toLocaleTimeString('zh-CN')
   }
@@ -166,7 +209,7 @@ function App() {
         </div>
       </div>
       <div className="data-list">
-        {events.slice(0, 50).map((e, i) => (
+        {events.slice(0, 50).map((e: VisionEvent, i: number) => (
           <div key={i} className="event-item">
             <div className="event-header">
               <RiskBadge score={e.riskScore} />
@@ -205,7 +248,7 @@ function App() {
         </div>
       </div>
       <div className="data-list">
-        {alerts.slice(0, 50).map((a, i) => (
+        {alerts.slice(0, 50).map((a: Alert, i: number) => (
           <div key={i} className="alert-item">
             <div className="alert-header">
               <RiskBadge level={a.level} />
@@ -249,7 +292,7 @@ function App() {
         </div>
       </div>
       <div className="camera-grid">
-        {cameras.map((camera) => (
+        {cameras.map((camera: Camera) => (
           <div key={camera.id} className="camera-card">
             <div className="camera-header">
               <Icon name="camera" size={20} />
